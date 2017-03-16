@@ -33,24 +33,7 @@ func (org *Organization) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
-// GetOrganization returns an Organization associated with the provided guid.
-func (client *Client) GetOrganization(guid string) (Organization, Warnings, error) {
-	request, err := client.newHTTPRequest(requestOptions{
-		RequestName: internal.GetOrganizationRequest,
-		URIParams:   Params{"organization_guid": guid},
-	})
-	if err != nil {
-		return Organization{}, nil, err
-	}
-
-	var org Organization
-	response := cloudcontroller.Response{
-		Result: &org,
-	}
-
-	err = client.connection.Make(request, &response)
-	return Organization(org), response.Warnings, err
-}
+//go:generate go run gen_get_by_guid.go Organization
 
 // GetOrganizations returns back a list of Organizations based off of the
 // provided queries.
