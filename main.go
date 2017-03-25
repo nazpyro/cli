@@ -7,10 +7,10 @@ import (
 	"reflect"
 	"strings"
 
-	"code.cloudfoundry.org/cli/cf/cmd"
 	"code.cloudfoundry.org/cli/command"
 	"code.cloudfoundry.org/cli/command/common"
 	"code.cloudfoundry.org/cli/command/v2"
+	"code.cloudfoundry.org/cli/plugin/runner"
 	"code.cloudfoundry.org/cli/util/configv3"
 	"code.cloudfoundry.org/cli/util/panichandler"
 	"code.cloudfoundry.org/cli/util/ui"
@@ -98,7 +98,14 @@ func parse(args []string) {
 			parse([]string{"help", args[0]})
 			os.Exit(1)
 		case flags.ErrUnknownCommand:
-			cmd.Main(os.Getenv("CF_TRACE"), os.Args)
+			pluginErr := runPlugin(args)
+			if _, ok := pluginErr.(runner.PluginNotFoundError); ok {
+				fmt.Fprintf(os.Stderr, err.Error())
+				os.Exit(1)
+			} else if pluginErr != nil {
+				fmt.Fprintf(os.Stderr, pluginErr.Error())
+				os.Exit(1)
+			}
 		case flags.ErrCommandRequired:
 			if common.Commands.VerboseOrVersion {
 				parse([]string{"version"})
@@ -162,6 +169,22 @@ func executionWrapper(cmd flags.Commander, args []string) error {
 	}
 
 	return fmt.Errorf("command does not conform to ExtendedCommander")
+}
+
+func runPlugin(args []string) error {
+	cfConfig, err := configv3.LoadConfig(configv3.FlagOverride{
+		Verbose: common.Commands.VerboseOrVersion,
+	})
+	if err != nil {
+		return err
+	}
+
+	commandUI, err := ui.NewUI(cfConfig)
+	if err != nil {
+		return err
+	}
+
+	return runner.RunPlugin(cfConfig, commandUI, args)
 }
 
 func handleError(err error, commandUI UI) error {
