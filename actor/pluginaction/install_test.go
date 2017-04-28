@@ -17,11 +17,75 @@ var _ = Describe("install actions", func() {
 	var (
 		actor      Actor
 		fakeConfig *pluginactionfakes.FakeConfig
+		tempDir    string
 	)
 
 	BeforeEach(func() {
 		fakeConfig = new(pluginactionfakes.FakeConfig)
+		var err error
+		tempDir, err = ioutil.TempDir("", "")
+		Expect(err).ToNot(HaveOccurred())
+		fakeConfig.PluginHomeReturns(tempDir)
 		actor = NewActor(fakeConfig, nil)
+	})
+
+	AfterEach(func() {
+		err := os.RemoveAll(tempDir)
+		Expect(err).ToNot(HaveOccurred())
+	})
+
+	Describe("CreateExecutableCopy", func() {
+		Context("when the file exists", func() {
+			var pluginPath string
+
+			BeforeEach(func() {
+				tempFile, err := ioutil.TempFile("", "")
+				Expect(err).ToNot(HaveOccurred())
+
+				_, err = tempFile.WriteString("cthulhu")
+				Expect(err).ToNot(HaveOccurred())
+
+				pluginPath = tempFile.Name()
+			})
+
+			AfterEach(func() {
+				err := os.Remove(pluginPath)
+				Expect(err).ToNot(HaveOccurred())
+			})
+
+			It("creates a copy of a file in plugin home and makes it executable", func() {
+				copyPath, err := actor.CreateExecutableCopy(pluginPath)
+				Expect(err).ToNot(HaveOccurred())
+
+				contents, err := ioutil.ReadFile(copyPath)
+				Expect(err).ToNot(HaveOccurred())
+				Expect(contents).To(BeEquivalentTo("cthulhu"))
+
+				stat, err := os.Stat(copyPath)
+				Expect(err).ToNot(HaveOccurred())
+				Expect(stat.Mode() & 0700).To(Equal(os.FileMode(0700)))
+			})
+
+			Context("when the plugin home does not exist", func() {
+				BeforeEach(func() {
+					fakeConfig.PluginHomeReturns("/a/file/that/does/not/exist")
+				})
+
+				It("returns an os.PathError", func() {
+					_, err := actor.CreateExecutableCopy(pluginPath)
+					_, isPathError := err.(*os.PathError)
+					Expect(isPathError).To(BeTrue())
+				})
+			})
+		})
+
+		Context("when the file does not exist", func() {
+			It("returns an os.PathError", func() {
+				_, err := actor.CreateExecutableCopy("/a/file/that/does/not/exist")
+				_, isPathError := err.(*os.PathError)
+				Expect(isPathError).To(BeTrue())
+			})
+		})
 	})
 
 	Describe("FileExists", func() {

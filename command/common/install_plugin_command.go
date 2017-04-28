@@ -1,6 +1,8 @@
 package common
 
 import (
+	"os"
+
 	"code.cloudfoundry.org/cli/actor/pluginaction"
 	"code.cloudfoundry.org/cli/command"
 	"code.cloudfoundry.org/cli/command/flag"
@@ -11,6 +13,7 @@ import (
 //go:generate counterfeiter . InstallPluginActor
 
 type InstallPluginActor interface {
+	CreateExecutableCopy(path string) (string, error)
 	FileExists(path string) bool
 	GetAndValidatePlugin(metadata pluginaction.PluginMetadata, commands pluginaction.CommandList, path string) (configv3.Plugin, error)
 	IsPluginInstalled(pluginName string) bool
@@ -59,6 +62,14 @@ func (cmd InstallPluginCommand) Execute(_ []string) error {
 				return shared.PluginInstallationCancelled{}
 			}
 		}
+
+		// copy plugin binary to a temporary location and make it executable
+		tempPluginPath, err := cmd.Actor.CreateExecutableCopy(pluginPath)
+		defer os.Remove(tempPluginPath)
+		if err != nil {
+			return err
+		}
+		pluginPath = tempPluginPath
 
 		rpcService, err := shared.NewRPCService(cmd.Config, cmd.UI)
 		if err != nil {

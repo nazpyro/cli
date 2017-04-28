@@ -1,6 +1,8 @@
 package plugin
 
 import (
+	"io/ioutil"
+	"os"
 	"path/filepath"
 
 	"code.cloudfoundry.org/cli/integration/helpers"
@@ -11,12 +13,7 @@ import (
 )
 
 var _ = Describe("install-plugin command", func() {
-	BeforeEach(func() {
-		helpers.RunIfExperimental("install-plugin refactor is experimental")
-	})
-
-	It("displays the experimental warning", func() {
-	})
+	var buffer *Buffer
 
 	Describe("help", func() {
 		Context("when the --help flag is given", func() {
@@ -53,15 +50,15 @@ var _ = Describe("install-plugin command", func() {
 			)
 		})
 
-		FContext("when the -f flag is given", func() {
-			FIt("installs the plugin", func() {
+		Context("when the -f flag is given", func() {
+			It("installs the plugin", func() {
 				session := helpers.CF("install-plugin", pluginPath, "-f")
 
-				Eventually(session.Out).Should(Say("Attention: Plugins are binaries written by potentially untrusted authors."))
-				Eventually(session.Out).Should(Say("Install and use plugins at your own risk."))
-				Eventually(session.Out).Should(Say("Installing plugin some-plugin..."))
+				Eventually(session.Out).Should(Say("Attention: Plugins are binaries written by potentially untrusted authors\\."))
+				Eventually(session.Out).Should(Say("Install and use plugins at your own risk\\."))
+				Eventually(session.Out).Should(Say("Installing plugin some-plugin\\.\\.\\."))
 				Eventually(session.Out).Should(Say("OK"))
-				Eventually(session.Out).Should(Say("Plugin some-plugin successfully installed."))
+				Eventually(session.Out).Should(Say("Plugin some-plugin 1\\.0\\.0 successfully installed\\."))
 
 				Eventually(session).Should(Exit(0))
 
@@ -72,17 +69,26 @@ var _ = Describe("install-plugin command", func() {
 				Eventually(pluginsSession).Should(Exit(0))
 
 				Eventually(helpers.CF("some-command")).Should(Exit(0))
+
 				helpSession := helpers.CF("help")
 				Eventually(helpSession.Out).Should(Say("some-command"))
 				Eventually(helpSession).Should(Exit(0))
 			})
 
 			Context("when the file is not executable", func() {
+				BeforeEach(func() {
+					Expect(os.Chmod(pluginPath, 0666)).ToNot(HaveOccurred())
+				})
+
 				It("installs the plugin", func() {
-					// check output
-					// cf plugins --shasum shows plugin with correct sha sum
-					// cf can run command from plugin
-					// cf help shows plugins commands
+					session := helpers.CF("install-plugin", pluginPath, "-f")
+					Eventually(session.Out).Should(Say("Plugin some-plugin 1\\.0\\.0 successfully installed\\."))
+					Eventually(session).Should(Exit(0))
+
+					// make sure plugin temp files are cleaned up
+					pluginBinaries, err := ioutil.ReadDir(filepath.Join(homeDir, ".cf", "plugins", "temp"))
+					Expect(err).ToNot(HaveOccurred())
+					Expect(len(pluginBinaries)).To(Equal(0))
 				})
 			})
 
@@ -104,44 +110,233 @@ var _ = Describe("install-plugin command", func() {
 
 			Context("command conflict", func() {
 				Context("when the plugin has a command that is the same as a built-in command", func() {
+					var pluginPath string
+
+					BeforeEach(func() {
+						pluginPath = helpers.BuildConfigurablePlugin(
+							"configurable_plugin", "some-plugin", "1.1.1",
+							[]helpers.PluginCommand{
+								{Name: "version"},
+							})
+					})
+
 					It("tells the user about the conflict and fails", func() {
+						session := helpers.CF("install-plugin", "-f", pluginPath)
+
+						Eventually(session.Out).Should(Say("Attention: Plugins are binaries written by potentially untrusted authors\\."))
+						Eventually(session.Out).Should(Say("Install and use plugins at your own risk\\."))
+
+						Eventually(session.Out).Should(Say("FAILED"))
+						Eventually(session.Err).Should(Say("Plugin some-plugin v1\\.1\\.1 could not be installed as it contains commands with names that are already used: version"))
+
+						Eventually(session).Should(Exit(1))
 					})
 				})
 
 				Context("when the plugin has a command that is the same as a built-in alias", func() {
+					BeforeEach(func() {
+						pluginPath = helpers.BuildConfigurablePlugin(
+							"configurable_plugin", "some-plugin", "1.1.1",
+							[]helpers.PluginCommand{
+								{Name: "cups"},
+							})
+					})
+
 					It("tells the user about the conflict and fails", func() {
+						session := helpers.CF("install-plugin", "-f", pluginPath)
+
+						Eventually(session.Out).Should(Say("Attention: Plugins are binaries written by potentially untrusted authors\\."))
+						Eventually(session.Out).Should(Say("Install and use plugins at your own risk\\."))
+
+						Eventually(session.Out).Should(Say("FAILED"))
+						Eventually(session.Err).Should(Say("Plugin some-plugin v1\\.1\\.1 could not be installed as it contains commands with names that are already used: cups"))
+
+						Eventually(session).Should(Exit(1))
 					})
 				})
 
 				Context("when the plugin has a command that is the same as another plugin command", func() {
+					BeforeEach(func() {
+						helpers.InstallConfigurablePlugin("existing-plugin", "1.1.1",
+							[]helpers.PluginCommand{
+								{Name: "existing-command"},
+							})
+
+						pluginPath = helpers.BuildConfigurablePlugin(
+							"configurable_plugin", "new-plugin", "1.1.1",
+							[]helpers.PluginCommand{
+								{Name: "existing-command"},
+							})
+					})
+
 					It("tells the user about the conflict and fails", func() {
+						session := helpers.CF("install-plugin", "-f", pluginPath)
+
+						Eventually(session.Out).Should(Say("Attention: Plugins are binaries written by potentially untrusted authors\\."))
+						Eventually(session.Out).Should(Say("Install and use plugins at your own risk\\."))
+
+						Eventually(session.Out).Should(Say("FAILED"))
+						Eventually(session.Err).Should(Say("Plugin new-plugin v1\\.1\\.1 could not be installed as it contains commands with names that are already used: existing-command\\."))
+
+						Eventually(session).Should(Exit(1))
 					})
 				})
 
 				Context("when the plugin has a command that is the same as another plugin alias", func() {
+					BeforeEach(func() {
+						helpers.InstallConfigurablePlugin("existing-plugin", "1.1.1",
+							[]helpers.PluginCommand{
+								{Name: "existing-command"},
+							})
+
+						pluginPath = helpers.BuildConfigurablePlugin(
+							"configurable_plugin", "new-plugin", "1.1.1",
+							[]helpers.PluginCommand{
+								{Name: "new-command", Alias: "existing-command"},
+							})
+					})
+
 					It("tells the user about the conflict and fails", func() {
+						session := helpers.CF("install-plugin", "-f", pluginPath)
+
+						Eventually(session.Out).Should(Say("Attention: Plugins are binaries written by potentially untrusted authors\\."))
+						Eventually(session.Out).Should(Say("Install and use plugins at your own risk\\."))
+
+						Eventually(session.Out).Should(Say("FAILED"))
+						Eventually(session.Err).Should(Say("Plugin new-plugin v1\\.1\\.1 could not be installed as it contains commands with aliases that are already used: existing-command\\."))
+
+						Eventually(session).Should(Exit(1))
 					})
 				})
 			})
 
 			Context("alias conflict", func() {
 				Context("when the plugin has an alias that is the same as a built-in command", func() {
+					var pluginPath string
+
+					BeforeEach(func() {
+						pluginPath = helpers.BuildConfigurablePlugin(
+							"configurable_plugin", "some-plugin", "1.1.1",
+							[]helpers.PluginCommand{
+								{Name: "some-command", Alias: "version"},
+							})
+					})
+
 					It("tells the user about the conflict and fails", func() {
+						session := helpers.CF("install-plugin", "-f", pluginPath)
+
+						Eventually(session.Out).Should(Say("Attention: Plugins are binaries written by potentially untrusted authors\\."))
+						Eventually(session.Out).Should(Say("Install and use plugins at your own risk\\."))
+
+						Eventually(session.Out).Should(Say("FAILED"))
+						Eventually(session.Err).Should(Say("Plugin some-plugin v1\\.1\\.1 could not be installed as it contains commands with aliases that are already used: version"))
+
+						Eventually(session).Should(Exit(1))
 					})
 				})
 
 				Context("when the plugin has an alias that is the same as a built-in alias", func() {
+					BeforeEach(func() {
+						pluginPath = helpers.BuildConfigurablePlugin(
+							"configurable_plugin", "some-plugin", "1.1.1",
+							[]helpers.PluginCommand{
+								{Name: "some-command", Alias: "cups"},
+							})
+					})
+
 					It("tells the user about the conflict and fails", func() {
+						session := helpers.CF("install-plugin", "-f", pluginPath)
+
+						Eventually(session.Out).Should(Say("Attention: Plugins are binaries written by potentially untrusted authors\\."))
+						Eventually(session.Out).Should(Say("Install and use plugins at your own risk\\."))
+
+						Eventually(session.Out).Should(Say("FAILED"))
+						Eventually(session.Err).Should(Say("Plugin some-plugin v1\\.1\\.1 could not be installed as it contains commands with aliases that are already used: cups"))
+
+						Eventually(session).Should(Exit(1))
 					})
 				})
 
 				Context("when the plugin has an alias that is the same as another plugin command", func() {
+					BeforeEach(func() {
+						helpers.InstallConfigurablePlugin("existing-plugin", "1.1.1",
+							[]helpers.PluginCommand{
+								{Name: "existing-command"},
+							})
+
+						pluginPath = helpers.BuildConfigurablePlugin(
+							"configurable_plugin", "new-plugin", "1.1.1",
+							[]helpers.PluginCommand{
+								{Name: "new-command", Alias: "existing-command"},
+							})
+					})
+
 					It("tells the user about the conflict and fails", func() {
+						session := helpers.CF("install-plugin", "-f", pluginPath)
+
+						Eventually(session.Out).Should(Say("Attention: Plugins are binaries written by potentially untrusted authors\\."))
+						Eventually(session.Out).Should(Say("Install and use plugins at your own risk\\."))
+
+						Eventually(session.Out).Should(Say("FAILED"))
+						Eventually(session.Err).Should(Say("Plugin new-plugin v1\\.1\\.1 could not be installed as it contains commands with aliases that are already used: existing-command\\."))
+
+						Eventually(session).Should(Exit(1))
 					})
 				})
 
 				Context("when the plugin has an alias that is the same as another plugin alias", func() {
+					BeforeEach(func() {
+						helpers.InstallConfigurablePlugin("existing-plugin", "1.1.1",
+							[]helpers.PluginCommand{
+								{Name: "existing-command", Alias: "existing-alias"},
+							})
+
+						pluginPath = helpers.BuildConfigurablePlugin(
+							"configurable_plugin", "new-plugin", "1.1.1",
+							[]helpers.PluginCommand{
+								{Name: "new-command", Alias: "existing-alias"},
+							})
+					})
+
 					It("tells the user about the conflict and fails", func() {
+						session := helpers.CF("install-plugin", "-f", pluginPath)
+
+						Eventually(session.Out).Should(Say("Attention: Plugins are binaries written by potentially untrusted authors\\."))
+						Eventually(session.Out).Should(Say("Install and use plugins at your own risk\\."))
+
+						Eventually(session.Out).Should(Say("FAILED"))
+						Eventually(session.Err).Should(Say("Plugin new-plugin v1\\.1\\.1 could not be installed as it contains commands with aliases that are already used: existing-alias\\."))
+
+						Eventually(session).Should(Exit(1))
+					})
+				})
+			})
+
+			Context("alias and command conflicts", func() {
+				Context("when the plugin has a command and an alias that are both taken by another plugin", func() {
+					BeforeEach(func() {
+						helpers.InstallConfigurablePlugin("existing-plugin", "1.1.1",
+							[]helpers.PluginCommand{
+								{Name: "existing-command", Alias: "existing-alias"},
+							})
+
+						pluginPath = helpers.BuildConfigurablePlugin(
+							"configurable_plugin", "new-plugin", "1.1.1",
+							[]helpers.PluginCommand{
+								{Name: "existing-command", Alias: "existing-alias"},
+							})
+					})
+
+					It("tells the user about the conflict and fails", func() {
+						session := helpers.CF("install-plugin", "-f", pluginPath)
+
+						Eventually(session.Out).Should(Say("Attention: Plugins are binaries written by potentially untrusted authors\\."))
+						Eventually(session.Out).Should(Say("Install and use plugins at your own risk\\."))
+
+						Eventually(session.Out).Should(Say("FAILED"))
+						Eventually(session.Err).Should(Say("Plugin new-plugin v1\\.1\\.1 could not be installed as it contains commands with names and aliases that are already used: existing-command, existing-alias\\."))
+
+						Eventually(session).Should(Exit(1))
 					})
 				})
 			})
@@ -149,23 +344,82 @@ var _ = Describe("install-plugin command", func() {
 
 		Context("when the -f flag is not given", func() {
 			Context("when the user says yes", func() {
+				BeforeEach(func() {
+					buffer = NewBuffer()
+					buffer.Write([]byte("y\n"))
+				})
+
 				It("installs the plugin", func() {
-					// check output
-					// cf plugins --shasum shows plugin with correct sha sum
-					// cf can run command from plugin
-					// cf help shows plugins commands
+					session := helpers.CFWithStdin(buffer, "install-plugin", pluginPath)
+
+					Eventually(session.Out).Should(Say("Attention: Plugins are binaries written by potentially untrusted authors\\."))
+					Eventually(session.Out).Should(Say("Install and use plugins at your own risk\\."))
+					Eventually(session.Out).Should(Say("Do you want to install the plugin %s\\? \\[yN\\]: y", pluginPath))
+					Eventually(session.Out).Should(Say("Installing plugin some-plugin\\.\\.\\."))
+					Eventually(session.Out).Should(Say("OK"))
+					Eventually(session.Out).Should(Say("Plugin some-plugin 1\\.0\\.0 successfully installed\\."))
+
+					Eventually(session).Should(Exit(0))
+
+					pluginsSession := helpers.CF("plugins", "--checksum")
+					expectedSha := helpers.Sha1Sum(
+						filepath.Join(homeDir, ".cf/plugins/configurable_plugin.some-plugin"))
+					Eventually(pluginsSession.Out).Should(Say("some-plugin\\s+1.0.0\\s+%s", expectedSha))
+					Eventually(pluginsSession).Should(Exit(0))
+
+					Eventually(helpers.CF("some-command")).Should(Exit(0))
+
+					helpSession := helpers.CF("help")
+					Eventually(helpSession.Out).Should(Say("some-command"))
+					Eventually(helpSession).Should(Exit(0))
 				})
 			})
 
 			Context("when the user says no", func() {
+				BeforeEach(func() {
+					buffer = NewBuffer()
+					buffer.Write([]byte("n\n"))
+				})
+
 				It("does not install the plugin", func() {
+					session := helpers.CFWithStdin(buffer, "install-plugin", pluginPath)
+
+					Eventually(session.Out).Should(Say("Attention: Plugins are binaries written by potentially untrusted authors\\."))
+					Eventually(session.Out).Should(Say("Install and use plugins at your own risk\\."))
+					Eventually(session.Out).Should(Say("Do you want to install the plugin %s\\? \\[yN\\]: n", pluginPath))
+					Eventually(session.Err).Should(Say("Plugin installation cancelled"))
+					Eventually(session.Out).Should(Say("FAILED"))
+
+					Eventually(session).Should(Exit(1))
 				})
 			})
 
 			Context("when the user interrupts with control-c", func() {
+				BeforeEach(func() {
+					buffer = NewBuffer()
+					buffer.Write([]byte("y")) // but not enter
+				})
+
 				It("does not install the plugin and does not create a bad state", func() {
-					// cf plugins still works
-					// cf install plugin -f of the same plugin works
+					session := helpers.CFWithStdin(buffer, "install-plugin", pluginPath)
+
+					Eventually(session.Out).Should(Say("Attention: Plugins are binaries written by potentially untrusted authors\\."))
+					Eventually(session.Out).Should(Say("Install and use plugins at your own risk\\."))
+					Eventually(session.Out).Should(Say("Do you want to install the plugin %s\\? \\[yN\\]:", pluginPath))
+
+					session.Interrupt()
+
+					Eventually(session.Out).Should(Say("FAILED"))
+
+					Eventually(session).Should(Exit(1))
+
+					// make sure cf plugins did not break
+					Eventually(helpers.CF("plugins", "--checksum")).Should(Exit(0))
+
+					// make sure a retry of the plugin install works
+					retrySession := helpers.CF("install-plugin", pluginPath, "-f")
+					Eventually(retrySession.Out).Should(Say("Plugin some-plugin 1\\.0\\.0 successfully installed\\."))
+					Eventually(retrySession).Should(Exit(0))
 				})
 			})
 
@@ -176,14 +430,6 @@ var _ = Describe("install-plugin command", func() {
 		})
 
 		Context("when the file is not executable", func() {
-		})
-	})
-
-	Context("when the plugin contains command names that match core commands", func() {
-		It("displays an error on installation", func() {
-			session := helpers.CF("install-plugin", "-f", overrideTestPluginPath)
-			Eventually(session).Should(Say("Command `push` in the plugin being installed is a native CF command/alias."))
-			Eventually(session).Should(Exit(1))
 		})
 	})
 })

@@ -39,6 +39,9 @@ var _ = Describe("install-plugin command", func() {
 		}
 
 		fakeActor.FileExistsReturns(true)
+		fakeActor.CreateExecutableCopyStub = func(path string) (string, error) {
+			return path, nil
+		}
 	})
 
 	JustBeforeEach(func() {
@@ -189,6 +192,9 @@ var _ = Describe("install-plugin command", func() {
 					Expect(fakeActor.FileExistsCallCount()).To(Equal(1))
 					Expect(fakeActor.FileExistsArgsForCall(0)).To(Equal("some-path"))
 
+					Expect(fakeActor.CreateExecutableCopyCallCount()).To(Equal(1))
+					Expect(fakeActor.CreateExecutableCopyArgsForCall(0)).To(Equal("some-path"))
+
 					Expect(fakeActor.GetAndValidatePluginCallCount()).To(Equal(1))
 					_, _, path := fakeActor.GetAndValidatePluginArgsForCall(0)
 					Expect(path).To(Equal("some-path"))
@@ -202,6 +208,17 @@ var _ = Describe("install-plugin command", func() {
 					Expect(installedPlugin).To(Equal(plugin))
 
 					Expect(fakeActor.UninstallPluginCallCount()).To(Equal(0))
+				})
+
+				Context("when there is an error making an executable copy of the plugin binary", func() {
+					BeforeEach(func() {
+						expectedErr = errors.New("create executable copy error")
+						fakeActor.CreateExecutableCopyReturns("", expectedErr)
+					})
+
+					It("returns the error", func() {
+						Expect(executeErr).To(MatchError(expectedErr))
+					})
 				})
 
 				Context("when an error is encountered installing the plugin", func() {
