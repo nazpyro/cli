@@ -1,0 +1,14 @@
+package styletest
+
+func f1() bool {
+	type foo struct {
+	}
+	return true
+}
+
+type type1 struct {
+}
+
+var b = 1
+
+const a = 6

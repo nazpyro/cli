@@ -5,12 +5,14 @@ import (
 	"go/ast"
 	"go/parser"
 	"go/token"
+	"os"
 )
 
 type visitor struct {
 	constSpecs []string
 	funcDecls  []string
 	typeSpecs  []string
+	varSpecs   []string
 	warnings   []string
 }
 
@@ -20,44 +22,62 @@ func (v *visitor) Visit(node ast.Node) ast.Visitor {
 		return v
 	case *ast.GenDecl:
 		if typedNode.Tok == token.CONST {
-			constName := typedNode.Specs[0].(*ast.ValueSpec).Names[0].Name
-			v.constSpecs = append(v.constSpecs, constName)
-			if len(v.funcDecls) != 0 {
-				v.warnings = append(v.warnings, fmt.Sprintf("constant '%s' comes after a function declaration", constName))
-			}
+			v.checkConst(typedNode)
+		} else if typedNode.Tok == token.VAR {
+			v.checkVar(typedNode)
 		}
 		return v
-	case *ast.TypeSpec:
-		v.typeSpecs = append(v.typeSpecs, typedNode.Name.Name)
-		if len(v.funcDecls) != 0 {
-			v.warnings = append(v.warnings, fmt.Sprintf("type declaration for '%s' comes after a function declaration", typedNode.Name.Name))
-		}
 	case *ast.FuncDecl:
-		v.funcDecls = append(v.funcDecls, typedNode.Name.Name)
+		v.checkFunc(typedNode)
+	case *ast.TypeSpec:
+		v.checkType(typedNode)
 	}
 
 	return nil
 }
 
-func main() {
-	src := `
-package foo
-
-
-func f1() bool {
-	type foo struct {
+func (v *visitor) checkConst(node *ast.GenDecl) {
+	constName := node.Specs[0].(*ast.ValueSpec).Names[0].Name
+	v.constSpecs = append(v.constSpecs, constName)
+	if len(v.funcDecls) != 0 {
+		v.warnings = append(v.warnings, fmt.Sprintf("constant '%s' comes after a function declaration", constName))
 	}
-	return true
+	if len(v.typeSpecs) != 0 {
+		v.warnings = append(v.warnings, fmt.Sprintf("constant '%s' comes after a type declaration", constName))
+	}
+	if len(v.varSpecs) != 0 {
+		v.warnings = append(v.warnings, fmt.Sprintf("constant '%s' comes after a variable declaration", constName))
+	}
 }
 
-type type1 struct {
+func (v *visitor) checkVar(node *ast.GenDecl) {
+	varName := node.Specs[0].(*ast.ValueSpec).Names[0].Name
+	v.varSpecs = append(v.varSpecs, varName)
+	if len(v.funcDecls) != 0 {
+		v.warnings = append(v.warnings, fmt.Sprintf("variable '%s' comes after a function declaration", varName))
+	}
+	if len(v.typeSpecs) != 0 {
+		v.warnings = append(v.warnings, fmt.Sprintf("variable '%s' comes after a type declaration", varName))
+	}
 }
 
-const a = 6
-`
+func (v *visitor) checkFunc(node *ast.FuncDecl) {
+	funcName := node.Name.Name
+	v.funcDecls = append(v.funcDecls, funcName)
+}
 
+func (v *visitor) checkType(node *ast.TypeSpec) {
+	typeName := node.Name.Name
+	v.typeSpecs = append(v.typeSpecs, typeName)
+	if len(v.funcDecls) != 0 {
+		v.warnings = append(v.warnings, fmt.Sprintf("type declaration for '%s' comes after a function declaration", typeName))
+	}
+}
+
+func main() {
+	fmt.Printf("checking %s\n", os.Args[1])
 	fileSet := token.NewFileSet()
-	f, err := parser.ParseFile(fileSet, "", src, 0)
+	f, err := parser.ParseFile(fileSet, os.Args[1], nil, 0)
 	if err != nil {
 		panic(err)
 	}
@@ -69,6 +89,10 @@ const a = 6
 	// fmt.Println(ast.Print(fileSet, f))
 
 	for _, warning := range v.warnings {
-		fmt.Println(warning)
+		fmt.Printf("  %s\n", warning)
+	}
+
+	if len(v.warnings) > 0 {
+		os.Exit(1)
 	}
 }
