@@ -63,7 +63,24 @@ func (v *visitor) checkVar(node *ast.GenDecl) {
 
 func (v *visitor) checkFunc(node *ast.FuncDecl) {
 	funcName := node.Name.Name
-	v.funcDecls = append(v.funcDecls, funcName)
+
+	if node.Recv != nil {
+		var receiver string
+		switch typedType := node.Recv.List[0].Type.(type) {
+		case *ast.Ident:
+			receiver = typedType.Name
+		case *ast.StarExpr:
+			receiver = typedType.X.(*ast.Ident).Name
+		}
+		if len(v.typeSpecs) > 0 {
+			lastTypeSpec := v.typeSpecs[len(v.typeSpecs)-1]
+			if receiver != lastTypeSpec {
+				v.warnings = append(v.warnings, fmt.Sprintf("method '%s' of '%s' must be defined immediately after type '%s'", funcName, receiver, receiver))
+			}
+		}
+	} else {
+		v.funcDecls = append(v.funcDecls, funcName)
+	}
 }
 
 func (v *visitor) checkType(node *ast.TypeSpec) {
