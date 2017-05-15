@@ -59,7 +59,7 @@ var _ = Describe("install-plugin command", func() {
 		})
 	})
 
-	Context("installing a plugin from a local file", func() {
+	Describe("installing a plugin from a local file", func() {
 		var pluginPath string
 
 		Context("when the file is compiled for a different os and architecture", func() {
@@ -562,7 +562,7 @@ var _ = Describe("install-plugin command", func() {
 		})
 	})
 
-	Context("installing a plugin from a URL", func() {
+	Describe("installing a plugin from a URL", func() {
 		var (
 			server     *Server
 			pluginPath string
@@ -851,6 +851,127 @@ var _ = Describe("install-plugin command", func() {
 					Eventually(retrySession).Should(Exit(0))
 				})
 			})
+		})
+	})
+
+	XDescribe("installing a plugin from a specific repo", func() {
+		var server *Server
+
+		BeforeEach(func() {
+			server = NewServer()
+			// Suppresses ginkgo server logs
+			server.HTTPTestServer.Config.ErrorLog = log.New(&bytes.Buffer{}, "", 0)
+		})
+
+		AfterEach(func() {
+			server.Close()
+		})
+
+		Context("when the repo and the plugin name are swapped", func() {
+			It("reads the repo and the plugin name correctly", func() {
+				session := helpers.CF("install-plugin", "-f", "some-plugin", "-r", "CF-Community")
+
+				Eventually(session.Err).Should(Say("Plugin some-plugin not found in repository CF-Community\\."))
+			})
+		})
+
+		Context("when the repo is not registered", func() {
+			It("fails with an error message", func() {
+				session := helpers.CF("install-plugin", "-f", "-r", "repo-that-does-not-exist", "some-plugin")
+
+				Eventually(session.Err).Should(Say("Plugin repository repo-that-does-not-exist not found\\."))
+				Eventually(session.Err).Should(Say("Use 'cf list-plugin-repos' to list registered repositories\\."))
+				Eventually(session).Should(Exit(1))
+			})
+		})
+
+		Context("when fetching a list of plugins from a repo returns a 4xx or 5xx status", func() {
+			BeforeEach(func() {
+				server.AppendHandlers(
+					CombineHandlers(
+						VerifyRequest(http.MethodGet, "/list"),
+						RespondWith(http.StatusOK, `{"plugins":[]}`),
+					),
+					CombineHandlers(
+						VerifyRequest(http.MethodGet, "/list"),
+						RespondWith(http.StatusTeapot, nil),
+					),
+				)
+
+				Eventually(helpers.CF("add-plugin-repo", "kaka", server.URL())).Should(Exit(0))
+			})
+
+			It("fails with an error message", func() {
+				session := helpers.CF("install-plugin", "-f", "-r", "kaka", "some-plugin")
+
+				Eventually(session.Err).Should(Say("Could not get plugin repository 'kaka': 404 Not Found"))
+				// return fmt.Sprintf("HTTP response: %s\nRaw Response: %s", r.Status, r.RawResponse)
+				Eventually(session).Should(Exit(1))
+			})
+		})
+
+		Context("when the repo returns invalid json", func() {
+			BeforeEach(func() {
+				server.AppendHandlers(
+					CombineHandlers(
+						VerifyRequest(http.MethodGet, "/list"),
+						RespondWith(http.StatusOK, `{"plugins":[]}`),
+					),
+					CombineHandlers(
+						VerifyRequest(http.MethodGet, "/list"),
+						RespondWith(http.StatusOK, `{"foo":}`),
+					),
+				)
+
+				Eventually(helpers.CF("add-plugin-repo", "kaka", server.URL())).Should(Exit(0))
+			})
+
+			It("fails with an error message", func() {
+				session := helpers.CF("install-plugin", "-f", "-r", "kaka", "some-plugin")
+
+				Eventually(session.Err).Should(Say("Could not get plugin repository 'kaka': invalid character '}' looking for beginning of value"))
+				Eventually(session).Should(Exit(1))
+			})
+		})
+
+		Context("when the repo does not contain the specified plugin", func() {
+			It("fails with an error message", func() {})
+		})
+
+		Context("when the repo contains the specified plugin", func() {
+			Context("when -f is specified", func() {
+				Context("when the plugin checksum is invalid", func() {
+					It("fails with an error message", func() {})
+				})
+
+				Context("when the plugin checksum is valid", func() {
+					It("installs the plugin", func() {})
+
+					PContext("when the plugin is already installed", func() {
+						It("reinstalls the plugin", func() {})
+					})
+				})
+			})
+
+			// Context("when -f is not specified", func() {
+			// 	Context("when the user chooses no", func() {
+			// 		It("does not install the plugin", func() {})
+			// 	})
+
+			// 	Context("when the user chooses yes", func() {
+			// 		Context("when the plugin checksum is invalid", func() {
+			// 			It("fails with an error message", func() {})
+			// 		})
+
+			// 		Context("when the plugin checksum is valid", func() {
+			// 			It("installs the plugin", func() {})
+
+			// 			PContext("when the plugin is already installed", func() {
+			// 				It("fails with an error message", func() {})
+			// 			})
+			// 		})
+			// 	})
+			// })
 		})
 	})
 })

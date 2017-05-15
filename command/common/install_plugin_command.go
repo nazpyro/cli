@@ -49,10 +49,14 @@ func (cmd InstallPluginCommand) Execute(_ []string) error {
 		return nil
 	}
 
-	pluginNameOrLocation := cmd.OptionalArgs.PluginNameOrLocation.String()
+	var pluginNameOrLocation string
+	// if cmd.RegisteredRepository != "" {
+	// 	//get repo
+	// } else {
+	pluginNameOrLocation = cmd.OptionalArgs.PluginNameOrLocation.String()
+	// }
 
 	tempPluginPath, err := cmd.getExecutableBinary(pluginNameOrLocation)
-
 	defer os.Remove(tempPluginPath)
 	if err != nil {
 		return err
