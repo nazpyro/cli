@@ -8,12 +8,19 @@ import (
 	"os"
 )
 
+type warning struct {
+	message string
+	token.Position
+}
+
 type visitor struct {
+	fileSet *token.FileSet
+
 	constSpecs []string
 	funcDecls  []string
 	typeSpecs  []string
 	varSpecs   []string
-	warnings   []string
+	warnings   []warning
 }
 
 func (v *visitor) Visit(node ast.Node) ast.Visitor {
@@ -40,13 +47,13 @@ func (v *visitor) checkConst(node *ast.GenDecl) {
 	constName := node.Specs[0].(*ast.ValueSpec).Names[0].Name
 	v.constSpecs = append(v.constSpecs, constName)
 	if len(v.funcDecls) != 0 {
-		v.warnings = append(v.warnings, fmt.Sprintf("constant '%s' comes after a function declaration", constName))
+		v.addWarning(fmt.Sprintf("constant '%s' comes after a function declaration", constName), node.Pos())
 	}
 	if len(v.typeSpecs) != 0 {
-		v.warnings = append(v.warnings, fmt.Sprintf("constant '%s' comes after a type declaration", constName))
+		v.addWarning(fmt.Sprintf("constant '%s' comes after a type declaration", constName), node.Pos())
 	}
 	if len(v.varSpecs) != 0 {
-		v.warnings = append(v.warnings, fmt.Sprintf("constant '%s' comes after a variable declaration", constName))
+		v.addWarning(fmt.Sprintf("constant '%s' comes after a variable declaration", constName), node.Pos())
 	}
 }
 
@@ -54,10 +61,10 @@ func (v *visitor) checkVar(node *ast.GenDecl) {
 	varName := node.Specs[0].(*ast.ValueSpec).Names[0].Name
 	v.varSpecs = append(v.varSpecs, varName)
 	if len(v.funcDecls) != 0 {
-		v.warnings = append(v.warnings, fmt.Sprintf("variable '%s' comes after a function declaration", varName))
+		v.addWarning(fmt.Sprintf("variable '%s' comes after a function declaration", varName), node.Pos())
 	}
 	if len(v.typeSpecs) != 0 {
-		v.warnings = append(v.warnings, fmt.Sprintf("variable '%s' comes after a type declaration", varName))
+		v.addWarning(fmt.Sprintf("variable '%s' comes after a type declaration", varName), node.Pos())
 	}
 }
 
@@ -75,7 +82,7 @@ func (v *visitor) checkFunc(node *ast.FuncDecl) {
 		if len(v.typeSpecs) > 0 {
 			lastTypeSpec := v.typeSpecs[len(v.typeSpecs)-1]
 			if receiver != lastTypeSpec {
-				v.warnings = append(v.warnings, fmt.Sprintf("method '%s' of '%s' must be defined immediately after type '%s'", funcName, receiver, receiver))
+				v.addWarning(fmt.Sprintf("method '%s' of '%s' must be defined immediately after type '%s'", funcName, receiver, receiver), node.Pos())
 			}
 		}
 	} else {
@@ -87,26 +94,34 @@ func (v *visitor) checkType(node *ast.TypeSpec) {
 	typeName := node.Name.Name
 	v.typeSpecs = append(v.typeSpecs, typeName)
 	if len(v.funcDecls) != 0 {
-		v.warnings = append(v.warnings, fmt.Sprintf("type declaration for '%s' comes after a function declaration", typeName))
+		v.addWarning(fmt.Sprintf("type declaration for '%s' comes after a function declaration", typeName), node.Pos())
 	}
 }
 
+func (v *visitor) addWarning(message string, pos token.Pos) {
+	v.warnings = append(v.warnings, warning{
+		message:  message,
+		Position: v.fileSet.Position(pos),
+	})
+}
+
 func main() {
-	fmt.Printf("checking %s\n", os.Args[1])
 	fileSet := token.NewFileSet()
 	f, err := parser.ParseFile(fileSet, os.Args[1], nil, 0)
 	if err != nil {
 		panic(err)
 	}
 
-	v := visitor{}
+	v := visitor{
+		fileSet: fileSet,
+	}
 
 	ast.Walk(&v, f)
 
 	// fmt.Println(ast.Print(fileSet, f))
 
 	for _, warning := range v.warnings {
-		fmt.Printf("  %s\n", warning)
+		fmt.Printf("%s:%d %s\n", warning.Position.Filename, warning.Position.Line, warning.message)
 	}
 
 	if len(v.warnings) > 0 {
