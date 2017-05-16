@@ -1,5 +1,7 @@
 #!/bin/sh
 
+set -e
+
 go build
 
 find /home/pivotal/go/src/code.cloudfoundry.org/cli \
